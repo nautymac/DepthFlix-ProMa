@@ -106,3 +106,49 @@ frag3Dsx.sh = perOffset 없는 실스테레오용 변형
   카메라 얼굴검출(RFF*.bmd, takee.camera.* 인텐트)은 이 렌더 경로에 연결돼 있지 않다.
   → 새 앱도 카메라 없이 동작 가능.
 - 3DPlayer 는 화이트리스트에 없다. 자체 인터레이스를 렌더하므로 3DFV 에 등록하면 안 된다 (이중 처리).
+
+## 아이트래킹 — libholography 로는 불가능 (측정으로 확인, 조사 종료)
+
+**목표였던 것:** 태블릿을 들고 볼 때 정면을 벗어나면 좌/우 영상이 섞여 3D 가 깨진다.
+시청자 눈 위치를 마스크에 반영하면 해결된다.
+
+**결론: `libholography.so` 에는 시점 조향 기능이 없다.**
+
+### 근거 1 — 기본 앱들도 안 쓴다
+```java
+// Sight3D(3Dkankan) 의 Holography.java
+public static void startFaceDetector() { }   // 빈 껍데기
+public static void stopFaceDetector()  { }   // 빈 껍데기
+// Render3D.java:146
+Holography.update(0, 0);                     // 고정 중앙
+```
+3DPlayer 도 동일하게 `update(0, 0)` 만 쓴다.
+
+### 근거 2 — getter 가 항상 0
+`startAutoSwitch()` 를 부른 뒤 `getx/gety/getdis` 를 폴링:
+```
+startAutoSwitch: 성공 (크래시 없음 — 인자 없는 void/int 시그니처는 안전)
+탐침 0: x=0 y=0 dis=0
+탐침 1: x=0 y=0 dis=0
+```
+심볼은 있지만 아무도 값을 채우지 않는다.
+
+### 근거 3 — update(x, y) 의 인자가 무시된다
+같은 프레임에서 눈 좌표만 바꿔 렌더한 뒤 픽셀 비교:
+```
+eye_300 vs eye_900   평균차 0.000  최대차 0   ← 비트 단위로 동일
+```
+x 를 300 → 900 으로 바꿔도 출력이 완전히 같다. 마스크가 전혀 움직이지 않는다.
+
+### 아이트래킹은 3DFV 에만 있다
+3DFV 는 `libeyecv_proc.so`(3.3MB CV 엔진)로 눈을 추적해 SurfaceFlinger 에 직접
+좌표를 보낸다(`send2sf3(8001, 19791872, x, y, ...)`). 화이트리스트 앱 전용 경로라,
+자체 인터레이스를 렌더하는 플레이어는 이 혜택을 받지 못한다.
+(우리 앱을 화이트리스트에 넣으면 이중 처리로 깨진다.)
+
+### 남은 방법과 비용
+자체 CV 로 눈을 추적하고 **마스크를 libholography 없이 직접 생성**해야 한다.
+`/sdcard/3DKanKan/matrix`(8,192,000 = 2560×1600×2 바이트) 의 포맷을 역공학해
+GLSL 로 재현하고, 눈 위치에 따라 위상을 옮기는 작업이다. 며칠 단위이고 실패 가능성도 있다.
+
+**현실적 대안:** 거치해서 보거나, 시야각이 반대로 넘어갔을 때 `좌우반전` 버튼을 누른다.

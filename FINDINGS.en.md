@@ -132,3 +132,50 @@ if (fract(dis_test) != 0.0) rgb *= (abs(dis_test-0.5)+0.5);   // crosstalk suppr
 
 - 3DPlayer is not in the whitelist. It renders its own interlacing, so it must not be
   registered with 3DFV (that would process it twice).
+
+## Eye tracking — not possible with libholography (measured, investigation closed)
+
+**The goal:** when the tablet is handheld and moves off-axis, the left/right views mix and
+the 3D breaks. Feeding the viewer's eye position into the mask would fix it.
+
+**Conclusion: `libholography.so` has no view-steering capability.**
+
+### Evidence 1 — the stock apps do not use it
+```java
+// Holography.java in Sight3D (3Dkankan)
+public static void startFaceDetector() { }   // empty stub
+public static void stopFaceDetector()  { }   // empty stub
+// Render3D.java:146
+Holography.update(0, 0);                     // fixed centre
+```
+3DPlayer does the same — `update(0, 0)` only.
+
+### Evidence 2 — the getters always return 0
+Polling `getx/gety/getdis` after calling `startAutoSwitch()`:
+```
+startAutoSwitch: succeeded (no crash — the no-arg void/int signatures are safe)
+probe 0: x=0 y=0 dis=0
+probe 1: x=0 y=0 dis=0
+```
+The symbols exist but nothing populates them.
+
+### Evidence 3 — update(x, y) ignores its arguments
+Rendering the same frame with only the eye coordinate changed, then comparing pixels:
+```
+eye_300 vs eye_900   mean diff 0.000  max diff 0   ← bit-identical
+```
+Changing x from 300 to 900 produces exactly the same output. The mask does not move.
+
+### Eye tracking lives only in 3DFV
+3DFV tracks eyes with `libeyecv_proc.so` (a 3.3MB CV engine) and sends the coordinates
+straight to SurfaceFlinger (`send2sf3(8001, 19791872, x, y, ...)`). That path serves
+whitelisted apps only, so a player that renders its own interlacing gets no benefit.
+(Adding our app to the whitelist would double-process and break the image.)
+
+### What would remain, and what it costs
+We would have to track eyes ourselves **and generate the mask without libholography** —
+reverse engineering the format of `/sdcard/3DKanKan/matrix` (8,192,000 = 2560×1600×2 bytes),
+reproducing it in GLSL, and shifting its phase with eye position. Days of work, and it may
+not pan out.
+
+**Practical alternative:** view it on a stand, or press `Swap L/R` when the view flips.
