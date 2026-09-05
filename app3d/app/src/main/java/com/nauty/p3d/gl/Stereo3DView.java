@@ -42,7 +42,18 @@ public class Stereo3DView extends GLSurfaceView {
     private volatile Output       output       = Output.THREE_D;
     private volatile boolean      swapLR       = false;
     private volatile float        depth        = 1.0f;    // 2D->3D 시어 배율
-    private volatile float        perOffset    = 0.0f;    // 수렴점 (+-0.015)
+    /**
+     * 수렴 보정. 화면에 나가는 시차(우안 x − 좌안 x)에 더할 픽셀 수다.
+     *
+     * 양수면 시차가 커져 장면이 화면 뒤로 물러나고, 음수면 앞으로 나온다.
+     * 좌안 −c/2, 우안 +c/2 로 반씩 나눠 걸어 융합된 상이 옆으로 밀리지 않게 한다.
+     *
+     * 눈금을 화면 픽셀로 잡은 이유: 게임 SBS 의 시차는 만들 때 쓰던 해상도의
+     * 픽셀 수로 굳어 있는데, 그것을 이 화면 폭에 맞춰 늘리거나 줄이면 시차도
+     * 같은 비율로 변한다. 소스 픽셀을 기준으로 잡으면 소스가 바뀔 때마다 같은
+     * 값의 뜻이 달라지지만, 화면 픽셀이면 어떤 소스든 "화면에서 이만큼" 으로 같다.
+     */
+    private volatile float        convergence  = 0.0f;
     private volatile float        bottomCut    = 1.0f;    // 1.0 = 비활성
     /** 화면 비 강제값 (0 = 소스 그대로). 레터박스가 거슬리거나 소스 비율이 틀린 경우용. */
     public static final float ASPECT_FILL = -1f;
@@ -124,10 +135,34 @@ public class Stereo3DView extends GLSurfaceView {
     public void setDepth(float d)               { depth = d;        requestRender(); }
     public void setBottomCut(float c)           { bottomCut = c;    requestRender(); }
 
-    public void setPerOffset(float p) {
-        perOffset = Math.max(-0.015f, Math.min(0.015f, p));
+    /** 슬라이더와 자동 보정이 함께 쓰는 한계. 실측 최대 보정량이 224px 이라 넉넉히 잡는다. */
+    public static final float CONVERGENCE_MAX = 320f;
+
+    /**
+     * 수렴 보정 (화면 시차 픽셀). 0 이면 소스 그대로.
+     *
+     * 예전에는 이 값을 인터레이스 셰이더(frag3D.sh 의 perOffset)에 넘겼는데,
+     * 그 셰이더는 밀린 만큼 <b>옆 눈의 그림을 끌어다 쓴다</b> — 화면 좌우 끝에
+     * 반대쪽 눈 조각이 묻어난다 (원본에도 그걸 검게 칠하려던 코드가 주석으로 남아 있다).
+     *
+     * 지금은 좌/우 뷰를 FBO 에 그릴 때 뷰포트를 반씩 반대로 밀고 가위질(scissor)로
+     * 각자의 절반 밖을 막는다. 밀려서 드러난 자리가 옆 눈이 아니라 검은색이 된다.
+     */
+    public void setConvergence(float px) {
+        convergence = Math.max(-CONVERGENCE_MAX, Math.min(CONVERGENCE_MAX, px));
         requestRender();
     }
+    public float getConvergence() { return convergence; }
+
+    /**
+     * 눈 하나가 화면에서 갖는 픽셀 크기. 자막 크기와 수렴 눈금의 기준이다.
+     * 이 기기는 우리가 화면까지 그리므로 화면 크기가 곧 눈 상자다.
+     */
+    public int eyeWidthPx()  { return surfaceW; }
+    public int eyeHeightPx() { return surfaceH; }
+
+    /** 화면에 나가는 GL 표면 크기. GL 스레드 밖에서도 읽을 수 있게 복사해 둔다. */
+    private volatile int surfaceW = 0, surfaceH = 0;
 
     /**
      * 한쪽 눈 그림의 종횡비를 강제한다.
@@ -170,7 +205,6 @@ public class Stereo3DView extends GLSurfaceView {
     public Output  getOutput()    { return output; }
     public boolean isSwapLR()     { return swapLR; }
     public float   getDepth()     { return depth; }
-    public float   getPerOffset() { return perOffset; }
 
     // -------------------------------------------------------------------
 
@@ -224,6 +258,8 @@ public class Stereo3DView extends GLSurfaceView {
         public void onSurfaceChanged(GL10 gl, int w, int h) {
             surfW = w;
             surfH = h;
+            surfaceW = w;
+            surfaceH = h;
             if (fbo != null) fbo.release();
             fbo = new Fbo(w, h);
 
@@ -287,7 +323,9 @@ public class Stereo3DView extends GLSurfaceView {
                 if (out == Output.SBS_DEBUG) {
                     blit.draw(fbo.texture(), 0f, 0f, 1f, 1f);
                 } else {
-                    interlace.draw(fbo.texture(), perOffset);
+                    // 수렴은 이미 FBO 를 만들 때 좌/우 뷰포트를 밀어서 걸었다.
+                    // 여기서 또 걸면 두 번 밀린다 (setConvergence 주석 참고).
+                    interlace.draw(fbo.texture(), 0f);
                 }
             }
 
@@ -343,14 +381,19 @@ public class Stereo3DView extends GLSurfaceView {
                 // 화면 전체가 슬라이더에 반응하고 한쪽 눈의 최대 이동량도 절반이 된다.
                 //
                 // 기울기가 음수인 이유: 원본 상수를 그대로 옮겼더니 깊이 순서가 거꾸로였다.
-                // 진짜 SBS 영상의 좌우 시차를 블록 매칭으로 재보면 (눈당 1920px 기준)
-                //     위 +2px  ->  아래 -8px      지면이 앞, 하늘이 뒤   ← 실제
-                // 인데 우리 출력은
-                //     위 -4px  ->  아래 +4px      하늘이 앞, 지면이 뒤   ← 반대였다
-                // 셰이더가 t.x += (shearTop - v*shearSlope) 로 샘플링 위치를 옮기므로
-                // 양수는 그 눈의 그림을 왼쪽으로 민다. v=1 이 화면 아래이니 원래 식은
-                // 위를 앞으로 보내고 있었다. 뒤집어 재측정하니 위 +8 -> 아래 -8 로
-                // 실제와 방향이 맞았다.
+                // 하늘이 앞, 지면이 뒤로 보였다.
+                //
+                // 부호를 머리로 따지려 들면 헷갈린다 — vTex.y 가 화면의 위인지 아래인지가
+                // uSTMatrix(SurfaceTexture 가 넣는 상하 뒤집기)에 달려 있기 때문이다.
+                // 그래서 실기에서 쟀다. 2D 영상을 SBS 확인 모드로 띄우고(depth=3) 화면을
+                // 캡처해 세로 위치별로 좌우 절반의 시차를 블록 매칭한 결과:
+                //
+                //     화면 위   y=  80   시차 +58px   ← 뒤 (하늘)
+                //               y= 880   시차  -6px   ← 화면 평면 (거의 정중앙)
+                //     화면 아래 y=1520   시차 -59px   ← 앞 (지면)
+                //
+                // 위가 뒤, 아래가 앞 — 실제 장면의 깊이 순서와 맞다. 영점도 화면
+                // 중앙에 있어 SHEAR_PIVOT 이 의도대로 걸렸다.
                 shearSlope = -0.0000122f * surfW * depth;
                 shearTop   = shearSlope * SHEAR_PIVOT;
             }
@@ -369,20 +412,34 @@ public class Stereo3DView extends GLSurfaceView {
             float halfTop   = shearTop   * 0.5f;
             float halfSlope = shearSlope * 0.5f;
 
-            GLES20.glViewport(dxL, dy, dw, dh);
-            src.draw(oesTex, stMatrix, uvL[0], uvL[1], uvL[2], uvL[3],
-                    -halfTop, -halfSlope, bottomCut);
-
-            // 우안: 2D 소스면 반대 방향으로 나머지 절반
-            GLES20.glViewport(dxR, dy, dw, dh);
-            src.draw(oesTex, stMatrix, uvR[0], uvR[1], uvR[2], uvR[3],
-                    halfTop, halfSlope, bottomCut);
+            // 수렴 보정. 좌안은 왼쪽으로, 우안은 오른쪽으로 반씩 민다.
+            //
+            // convergence 는 화면 픽셀이라 FBO 반쪽 픽셀로 환산해야 한다. 이 기기는
+            // 반쪽(1280)이 화면 전체(2560)로 늘어나는 아나모픽이라 절반이 된다.
+            int conv = Math.round(convergence * 0.5f * halfW / surfW);
 
             // 자막은 좌/우 뷰에 각각 그리되 서로 반대로 밀어 화면 앞쪽에 뜨게 한다.
             // (음의 시차: 좌안은 오른쪽으로, 우안은 왼쪽으로)
             float shiftHalf = subtitleDepth / 2f;   // 절반은 가로로 2배 늘어나므로 절반만 민다
-            drawSubtitleInHalf(0,     halfW,  shiftHalf);
+
+            // 밀린 그림이 옆 눈의 자리를 침범하지 못하게 각자의 절반으로 가위질한다.
+            // 이것이 예전 인터레이스 단계 수렴과의 결정적 차이다 (setConvergence 주석).
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
+
+            GLES20.glScissor(0, 0, halfW, fbo.height);
+            GLES20.glViewport(dxL - conv, dy, dw, dh);
+            src.draw(oesTex, stMatrix, uvL[0], uvL[1], uvL[2], uvL[3],
+                    -halfTop, -halfSlope, bottomCut);
+            drawSubtitleInHalf(0, halfW, shiftHalf);
+
+            // 우안: 2D 소스면 반대 방향으로 나머지 절반
+            GLES20.glScissor(halfW, 0, fbo.width - halfW, fbo.height);
+            GLES20.glViewport(dxR + conv, dy, dw, dh);
+            src.draw(oesTex, stMatrix, uvR[0], uvR[1], uvR[2], uvR[3],
+                    halfTop, halfSlope, bottomCut);
             drawSubtitleInHalf(halfW, halfW, -shiftHalf);
+
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
 
             fbo.unbind();
         }
