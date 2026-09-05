@@ -84,6 +84,18 @@ public final class StereoDetect {
                     + " (표본 " + frameW + "x" + frameH
                     + ", 원본 " + metaW + "x" + metaH + ")");
 
+            // 해상도가 결정적이면 표본 투표를 볼 필요가 없다.
+            //
+            // 3.56:1 짜리 영상은 2D 일 수 없다. 반대로 픽셀 판별은 시차가 큰 소스에서
+            // 2D 라고 답하는 일이 있다 — 3D Vision 계열 게임 캡처가 특히 그렇다.
+            // 실측: 진짜 full-SBS 스크린샷(3344x940)이 좌우차/대비 0.648, 상하차/대비
+            // 1.131 로 나와 문턱(0.38)도 배수(2.0)도 못 넘겼다.
+            SourceFormat byAspect = SourceFormat.fromAspect(aspW, aspH);
+            if (byAspect != null) {
+                Log.i(TAG, "  해상도가 결정적이라 " + byAspect.label);
+                return byAspect;
+            }
+
             if (sbs == 0 && tb == 0 && mono == 0) return null;   // 쓸만한 표본이 없었다
 
             if (sbs > tb && sbs >= mono) return sbsVariant(aspW, aspH);
