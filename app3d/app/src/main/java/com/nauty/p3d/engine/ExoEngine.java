@@ -23,6 +23,9 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+
+import com.nauty.p3d.net.NetDataSourceFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -60,7 +63,16 @@ public class ExoEngine implements VideoEngine {
                 + (FfmpegLibrary.isAvailable()
                         ? "사용 가능 (" + FfmpegLibrary.getVersion() + ")" : "없음"));
 
-        player = new ExoPlayer.Builder(ctx, renderers).build();
+        // smb:// 는 NetDataSourceFactory 가 SmbDataSource 로 돌리고, 그 밖의 스킴(http/
+        // https/content/file)은 그대로 기본 경로를 탄다. libVLC 를 걷어내면서 ExoPlayer
+        // 가 못 열던 smb:// 를 대신 열어 줄 것이 필요해졌다 — Lume Pad 2 저장소에서
+        // 만든 것을 그대로 옮겼다.
+        DefaultMediaSourceFactory mediaSourceFactory =
+                new DefaultMediaSourceFactory(ctx).setDataSourceFactory(new NetDataSourceFactory(ctx));
+
+        player = new ExoPlayer.Builder(ctx, renderers)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build();
         player.setVideoSurface(surface);
 
         // 내장 자막은 기본으로 꺼 둔다. 그래야 사용자가 트랙 선택기에서 직접 고른

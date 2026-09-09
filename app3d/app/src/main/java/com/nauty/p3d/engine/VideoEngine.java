@@ -12,8 +12,15 @@ import java.util.List;
  *
  * 3D 렌더 파이프라인은 "디코딩된 프레임이 SurfaceTexture 로 들어온다"는 것만 알면 되므로,
  * 그 아래는 갈아끼울 수 있다.
- *   ExoPlayer : 기기 MediaCodec 사용. 가볍고 HLS/DASH 에 강함.
- *   libVLC    : 자체 FFmpeg 내장. MKV / DTS / AC3 등 MediaCodec 이 못 하는 것을 커버.
+ *   ExoPlayer   : 기기 MediaCodec 으로 하드웨어 디코딩. 영상은 전부 이쪽이다.
+ *   PhotoEngine : 사진 한 장을 정지 프레임으로 흘려보낸다.
+ *
+ * 한때 libVLC 도 있었지만 걷어냈다. 이 기기에서 libVLC 는 MediaCodec 조회 중 예외를
+ * 맞아 하드웨어 디코더를 못 찾고 <b>항상</b> 소프트웨어로 디코딩한다 — 3840x1080
+ * 10bit HEVC 가 21fps 로 무너지는데 ExoPlayer 는 같은 파일을 27.6fps 로 돌린다.
+ * VLC 를 두던 이유가 둘이었는데 둘 다 사라졌다: DTS/AC3 무음은 FFmpeg 오디오
+ * 확장이 맡고, ExoPlayer 가 못 열던 smb:// 는 {@link com.nauty.p3d.net.SmbDataSource}
+ * 로 직접 연다 (Lume Pad 2 저장소에서 만든 것을 그대로 옮겼다).
  */
 public interface VideoEngine {
 
@@ -26,7 +33,6 @@ public interface VideoEngine {
         /**
          * 선택된 내장 자막 트랙의 지금 자막. null 이면 지울 자막이 없다는 뜻이다.
          * 텍스트 자막만 온다 — 이미지 자막(PGS/VOBSUB)은 선택 자체를 막아 여기로 오지 않는다.
-         * ExoEngine 만 실제로 이 콜백을 쓴다 (아래 트랙 선택 메서드들 참고).
          */
         void onEmbeddedCue(String text);
     }
@@ -34,7 +40,6 @@ public interface VideoEngine {
     /** 엔진 종류. 설정 저장과 UI 표시에 쓴다. */
     enum Kind {
         EXO("ExoPlayer"),
-        VLC("libVLC"),
         /** 사진 한 장을 정지 프레임으로 흘려보낸다 (PhotoEngine). 엔진 순환에는 넣지 않는다. */
         PHOTO("사진");
 
@@ -44,7 +49,7 @@ public interface VideoEngine {
 
     /**
      * @param surface        ExoPlayer 처럼 Surface 를 받는 엔진용
-     * @param surfaceTexture libVLC 처럼 SurfaceTexture 를 직접 받는 엔진용
+     * @param surfaceTexture SurfaceTexture 를 직접 받는 엔진용
      */
     void open(Context ctx, Uri uri, Surface surface, SurfaceTexture surfaceTexture, Listener l);
 
@@ -62,10 +67,8 @@ public interface VideoEngine {
 
     // --------------------------------------------------------- 트랙 선택
     //
-    // mkv/mp4 컨테이너 안에 여러 오디오·자막 트랙이 들어 있을 수 있다. ExoPlayer 로만
-    // 지원한다 — libVLC 는 --no-spu 로 자막 디코딩 자체를 꺼 뒀고(VlcEngine 주석 참고),
-    // 오디오 트랙도 별도 선택 UI 없이 기기가 고르는 것을 그대로 쓴다. PhotoEngine 과
-    // VlcEngine 은 전부 빈 목록/빈 구현으로 둔다.
+    // mkv/mp4 컨테이너 안에 여러 오디오·자막 트랙이 들어 있을 수 있다. 사진에는
+    // 트랙이라는 것이 없으니 PhotoEngine 은 전부 빈 목록/빈 구현으로 둔다.
 
     /** 컨테이너 안의 오디오 트랙. 아직 안 열렸거나 없으면 빈 목록. */
     List<TrackInfo> audioTracks();

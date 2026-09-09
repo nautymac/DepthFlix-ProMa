@@ -501,9 +501,8 @@ public class MainActivity extends Activity {
     // 이걸 광고한다 (평범한 Windows 공유 PC 는 안 할 수 있어 "직접 입력" 도 둔다).
     // 서버를 고르면 계정만 물어보고, 공유 이름은 로그인한 계정이 접근 가능한
     // 목록을 SRVSVC 로 직접 받아 고르게 한다 — 사용자가 공유 이름을 몰라도 된다.
-    // 재생 자체는 libVLC 의 libdsm/smb2 가 맡는다 — smb:// URI 를 그대로 열면
-    // PlayerActivity 의 defaultKind() 가 알아서 VLC 를 골라준다 (proma3d 는
-    // ExoPlayer 가 smb 를 못 열어 원래부터 그렇게 정해져 있었다).
+    // 재생 자체는 ExoEngine 에 붙인 SmbDataSource 가 맡는다 (libVLC 를 걷어내며
+    // Lume Pad 2 저장소에서 만든 것을 그대로 옮겼다 — VideoEngine 주석 참고).
 
     private void askSmbHost() {
         Toast.makeText(this, "SMB 서버 찾는 중…", Toast.LENGTH_SHORT).show();
