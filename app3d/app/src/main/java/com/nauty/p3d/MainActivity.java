@@ -23,6 +23,11 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.nauty.p3d.net.Dlna;
+import com.nauty.p3d.net.SmbBrowser;
+import com.nauty.p3d.net.SmbCredentials;
+import com.nauty.p3d.net.SmbUri;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -69,7 +74,7 @@ public class MainActivity extends Activity {
             }
         });
         addButton(row, "URL/스트리밍 열기", new View.OnClickListener() {
-            @Override public void onClick(View v) { askUrl(); }
+            @Override public void onClick(View v) { chooseNetworkSource(); }
         });
         addButton(row, "3D 컨트롤 센터", new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -312,6 +317,22 @@ public class MainActivity extends Activity {
         empty.setText(emptyText);
     }
 
+    /**
+     * "URL/스트리밍 열기" 를 DLNA·SMB 까지 넓힌다.
+     * URL 을 직접 넣는 기존 방식과, IP/포트만 넣으면 되는 DLNA·SMB 탐색을 고르게 한다.
+     */
+    private void chooseNetworkSource() {
+        final String[] items = { "URL", "DLNA", "SMB" };
+        new AlertDialog.Builder(this)
+                .setTitle("URL/스트리밍 열기")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) askUrl();
+                    else if (which == 1) askDlnaHost();
+                    else askSmbHost();
+                })
+                .show();
+    }
+
     private void askUrl() {
         final EditText in = new EditText(this);
         in.setHint("http(s)://… .mp4 / .m3u8 / .mpd / rtsp://…");
@@ -323,6 +344,197 @@ public class MainActivity extends Activity {
                     if (!u.isEmpty()) open(Uri.parse(u), u);
                 })
                 .setNegativeButton("취소", null)
+                .show();
+    }
+
+    // ------------------------------------------------------------ DLNA
+    //
+    // 사용자가 IP/포트를 직접 넣으므로 SSDP 멀티캐스트 탐색은 건너뛴다. description.xml
+    // 을 읽어 ContentDirectory 의 controlURL 을 찾고, Browse 로 목록을 받아 재생 URL
+    // (평범한 http 주소)을 그대로 연다 — http 는 기본적으로 ExoPlayer 가 열므로
+    // 재생 엔진 선택 로직도 손댈 것이 없다.
+
+    private void askDlnaHost() {
+        final EditText in = new EditText(this);
+        in.setHint("IP 주소[:포트]");
+        new AlertDialog.Builder(this)
+                .setTitle("DLNA")
+                .setMessage("흔한 포트: Plex 32469 · Serviio 8895 · Jellyfin 8096 · "
+                        + "Windows Media Player 2869 · MiniDLNA 8200")
+                .setView(in)
+                .setPositiveButton("다음", (d, w) -> {
+                    String hp = in.getText().toString().trim();
+                    if (hp.isEmpty()) return;
+                    String host = hp;
+                    int port = 8200;                    // MiniDLNA 기본값
+                    int c = hp.lastIndexOf(':');
+                    if (c > 0) {
+                        host = hp.substring(0, c);
+                        try { port = Integer.parseInt(hp.substring(c + 1)); }
+                        catch (NumberFormatException ignored) { }
+                    }
+                    startDlnaBrowse(host, port);
+                })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void startDlnaBrowse(final String host, final int port) {
+        Toast.makeText(this, "DLNA 에 연결하는 중…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final String controlUrl = Dlna.findControlUrl(host, port);
+                    dlnaBrowseTo(controlUrl, "0", "DLNA");
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() { dlnaFailed(e); }
+                    });
+                }
+            }
+        }, "dlna-connect").start();
+    }
+
+    /** id 아래 목록을 받아 대화상자로 보여준다. 폴더를 고르면 재귀적으로 더 들어간다. */
+    private void dlnaBrowseTo(final String controlUrl, final String objectId, final String title) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final List<Dlna.Item> items = Dlna.browse(controlUrl, objectId);
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() { showDlnaItems(controlUrl, title, items); }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() { dlnaFailed(e); }
+                    });
+                }
+            }
+        }, "dlna-browse").start();
+    }
+
+    private void dlnaFailed(Exception e) {
+        Toast.makeText(this, "DLNA 실패: " + e.getMessage(), Toast.LENGTH_LONG).show();
+    }
+
+    private void showDlnaItems(final String controlUrl, String title, final List<Dlna.Item> items) {
+        if (items.isEmpty()) {
+            Toast.makeText(this, "이 폴더가 비었습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String[] names = new String[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            Dlna.Item it = items.get(i);
+            names[i] = it.container ? "📁 " + it.title : it.title;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setItems(names, (d, which) -> {
+                    Dlna.Item it = items.get(which);
+                    if (it.container) dlnaBrowseTo(controlUrl, it.id, it.title);
+                    else open(Uri.parse(it.url), it.title);
+                })
+                .show();
+    }
+
+    // ------------------------------------------------------------ SMB
+    //
+    // 목록만 smbj 로 훑는다. 재생 자체는 libVLC 의 libdsm/smb2 가 맡는다 — smb:// URI 를
+    // 그대로 열면 PlayerActivity 의 defaultKind() 가 알아서 VLC 를 골라준다
+    // (proma3d 는 ExoPlayer 가 smb 를 못 열어 원래부터 그렇게 정해져 있었다).
+
+    private void askSmbHost() {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        form.setPadding(pad, dp(8), pad, dp(8));
+
+        final EditText host = addField(form, "호스트 / IP 주소", false);
+        final EditText port = addField(form, "포트 (기본 445)", false);
+        port.setText("445");
+        final EditText share = addField(form, "공유 이름", false);
+        final EditText user = addField(form, "사용자 이름 (비우면 익명)", false);
+        final EditText pass = addField(form, "비밀번호", true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("SMB")
+                .setView(form)
+                .setPositiveButton("다음", (d, w) -> {
+                    String h = host.getText().toString().trim();
+                    if (h.isEmpty()) return;
+                    int p;
+                    try { p = Integer.parseInt(port.getText().toString().trim()); }
+                    catch (NumberFormatException e) { p = 445; }
+                    String sh = share.getText().toString().trim();
+                    String u = user.getText().toString().trim();
+                    String pw = pass.getText().toString();
+                    if (!u.isEmpty()) SmbCredentials.save(this, h, sh, u, pw, null);
+                    startSmbBrowse(h, p, sh, u, pw, "");
+                })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private EditText addField(LinearLayout parent, String hint, boolean password) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        if (password) {
+            e.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        }
+        parent.addView(e);
+        return e;
+    }
+
+    private void startSmbBrowse(final String host, final int port, final String share,
+                                 final String user, final String pass, final String path) {
+        Toast.makeText(this, "SMB 에 연결하는 중…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final List<SmbBrowser.Entry> entries =
+                            SmbBrowser.list(host, port, share, user, pass, path);
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            showSmbItems(host, port, share, user, pass, path, entries);
+                        }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            Toast.makeText(MainActivity.this,
+                                    "SMB 실패: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
+            }
+        }, "smb-browse").start();
+    }
+
+    private void showSmbItems(final String host, final int port, final String share,
+                               final String user, final String pass, final String path,
+                               final List<SmbBrowser.Entry> entries) {
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "이 폴더가 비었습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String[] names = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            SmbBrowser.Entry e = entries.get(i);
+            names[i] = e.directory ? "📁 " + e.name : e.name;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(path.isEmpty() ? share : path)
+                .setItems(names, (d, which) -> {
+                    SmbBrowser.Entry e = entries.get(which);
+                    String childPath = path.isEmpty() ? e.name : path + "\\" + e.name;
+                    if (e.directory) {
+                        startSmbBrowse(host, port, share, user, pass, childPath);
+                    } else {
+                        Uri uri = SmbUri.build(host, port, share, childPath, user, pass);
+                        open(uri, e.name);
+                    }
+                })
                 .show();
     }
 

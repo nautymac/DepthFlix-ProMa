@@ -283,4 +283,16 @@ public class VlcEngine implements VideoEngine {
     }
 
     @Override public Kind kind() { return Kind.VLC; }
+
+    // ----- 트랙 선택은 ExoPlayer 로만 지원한다 (VideoEngine 주석 참고).
+    //
+    // --no-spu 로 자막 디코딩 자체를 꺼 뒀으므로 내장 자막 트랙을 골라도 그릴 방법이
+    // 없다. 오디오는 player.getAudioTracks()/setAudioTrack(id) 로 실제 가능하지만,
+    // TrackInfo 가 ExoPlayer 의 TrackGroup+인덱스 주소 방식이라 VLC 의 정수 id 와
+    // 맞지 않는다 — 지금은 굳이 별도 주소 체계를 얹지 않는다.
+
+    @Override public java.util.List<TrackInfo> audioTracks() { return java.util.Collections.emptyList(); }
+    @Override public java.util.List<TrackInfo> textTracks()  { return java.util.Collections.emptyList(); }
+    @Override public void selectAudioTrack(TrackInfo track) { }
+    @Override public void selectTextTrack(TrackInfo track)  { }
 }
