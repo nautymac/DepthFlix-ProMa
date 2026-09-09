@@ -26,7 +26,9 @@ import android.widget.Toast;
 import com.nauty.p3d.net.Dlna;
 import com.nauty.p3d.net.SmbBrowser;
 import com.nauty.p3d.net.SmbCredentials;
+import com.nauty.p3d.net.SmbDiscovery;
 import com.nauty.p3d.net.SmbUri;
+import com.nauty.p3d.net.Ssdp;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -349,12 +351,51 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------ DLNA
     //
-    // 사용자가 IP/포트를 직접 넣으므로 SSDP 멀티캐스트 탐색은 건너뛴다. description.xml
-    // 을 읽어 ContentDirectory 의 controlURL 을 찾고, Browse 로 목록을 받아 재생 URL
-    // (평범한 http 주소)을 그대로 연다 — http 는 기본적으로 ExoPlayer 가 열므로
-    // 재생 엔진 선택 로직도 손댈 것이 없다.
+    // SSDP(M-SEARCH) 로 같은 네트워크의 미디어 서버를 먼저 찾아 보여준다 — IP 를
+    // 몰라도 이름만 보고 고르면 된다. 광고하지 않는 서버나 다른 서브넷에 있는
+    // 서버를 위해 "직접 입력" 도 남겨 둔다. description.xml 을 읽어 ContentDirectory
+    // 의 controlURL 을 찾고, Browse 로 목록을 받아 재생 URL(평범한 http 주소)을
+    // 그대로 연다 — http 는 기본적으로 ExoPlayer 가 열므로 재생 엔진 선택 로직도
+    // 손댈 것이 없다.
 
     private void askDlnaHost() {
+        Toast.makeText(this, "DLNA 서버 찾는 중…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final List<Ssdp.Device> devices = Ssdp.discover(MainActivity.this, 3000);
+                for (Ssdp.Device d : devices) {
+                    try { d.friendlyName = Dlna.fetchFriendlyName(d.location); }
+                    catch (Exception ignored) { }
+                }
+                runOnUiThread(new Runnable() {
+                    @Override public void run() { showDlnaHostPicker(devices); }
+                });
+            }
+        }, "ssdp-discover").start();
+    }
+
+    private void showDlnaHostPicker(final List<Ssdp.Device> devices) {
+        final String[] items = new String[devices.size() + 1];
+        for (int i = 0; i < devices.size(); i++) {
+            Ssdp.Device d = devices.get(i);
+            items[i] = d.friendlyName != null ? d.friendlyName : d.location;
+        }
+        items[devices.size()] = "주소 직접 입력…";
+
+        new AlertDialog.Builder(this)
+                .setTitle(devices.isEmpty() ? "DLNA — 찾은 서버 없음" : "DLNA")
+                .setItems(items, (d, which) -> {
+                    if (which == devices.size()) {
+                        askDlnaHostManual();
+                    } else {
+                        Ssdp.Device dev = devices.get(which);
+                        startDlnaBrowseFromLocation(dev.location, items[which]);
+                    }
+                })
+                .show();
+    }
+
+    private void askDlnaHostManual() {
         final EditText in = new EditText(this);
         in.setHint("IP 주소[:포트]");
         new AlertDialog.Builder(this)
@@ -379,6 +420,23 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void startDlnaBrowseFromLocation(final String descriptionUrl, final String title) {
+        Toast.makeText(this, "DLNA 에 연결하는 중…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final String controlUrl = Dlna.findControlUrl(descriptionUrl);
+                    dlnaBrowseTo(controlUrl, "0", title);
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() { dlnaFailed(e); }
+                    });
+                }
+            }
+        }, "dlna-connect").start();
+    }
+
+    /** "직접 입력" 경로. description.xml 이 "/description.xml" 에 있다고 가정한다. */
     private void startDlnaBrowse(final String host, final int port) {
         Toast.makeText(this, "DLNA 에 연결하는 중…", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
@@ -439,39 +497,123 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------ SMB
     //
-    // 목록만 smbj 로 훑는다. 재생 자체는 libVLC 의 libdsm/smb2 가 맡는다 — smb:// URI 를
-    // 그대로 열면 PlayerActivity 의 defaultKind() 가 알아서 VLC 를 골라준다
-    // (proma3d 는 ExoPlayer 가 smb 를 못 열어 원래부터 그렇게 정해져 있었다).
+    // mDNS(_smb._tcp.) 로 서버를 먼저 찾는다. Synology·QNAP·macOS 공유는 기본으로
+    // 이걸 광고한다 (평범한 Windows 공유 PC 는 안 할 수 있어 "직접 입력" 도 둔다).
+    // 서버를 고르면 계정만 물어보고, 공유 이름은 로그인한 계정이 접근 가능한
+    // 목록을 SRVSVC 로 직접 받아 고르게 한다 — 사용자가 공유 이름을 몰라도 된다.
+    // 재생 자체는 libVLC 의 libdsm/smb2 가 맡는다 — smb:// URI 를 그대로 열면
+    // PlayerActivity 의 defaultKind() 가 알아서 VLC 를 골라준다 (proma3d 는
+    // ExoPlayer 가 smb 를 못 열어 원래부터 그렇게 정해져 있었다).
 
     private void askSmbHost() {
+        Toast.makeText(this, "SMB 서버 찾는 중…", Toast.LENGTH_SHORT).show();
+        SmbDiscovery.discover(this, 3000, new SmbDiscovery.Callback() {
+            @Override public void onFinished(List<SmbDiscovery.Host> hosts) {
+                showSmbHostPicker(hosts);
+            }
+        });
+    }
+
+    private void showSmbHostPicker(final List<SmbDiscovery.Host> hosts) {
+        final String[] items = new String[hosts.size() + 1];
+        for (int i = 0; i < hosts.size(); i++) {
+            SmbDiscovery.Host h = hosts.get(i);
+            items[i] = h.name + "  (" + h.address + ")";
+        }
+        items[hosts.size()] = "주소 직접 입력…";
+
+        new AlertDialog.Builder(this)
+                .setTitle(hosts.isEmpty() ? "SMB — 찾은 서버 없음" : "SMB")
+                .setItems(items, (d, which) -> {
+                    if (which == hosts.size()) {
+                        askSmbHostManual();
+                    } else {
+                        SmbDiscovery.Host h = hosts.get(which);
+                        askSmbCredentials(h.address, h.port > 0 ? h.port : 445);
+                    }
+                })
+                .show();
+    }
+
+    private void askSmbHostManual() {
+        final EditText in = new EditText(this);
+        in.setHint("호스트 / IP 주소[:포트]");
+        new AlertDialog.Builder(this)
+                .setTitle("SMB")
+                .setView(in)
+                .setPositiveButton("다음", (d, w) -> {
+                    String hp = in.getText().toString().trim();
+                    if (hp.isEmpty()) return;
+                    String host = hp;
+                    int port = 445;
+                    int c = hp.lastIndexOf(':');
+                    if (c > 0) {
+                        host = hp.substring(0, c);
+                        try { port = Integer.parseInt(hp.substring(c + 1)); }
+                        catch (NumberFormatException ignored) { }
+                    }
+                    askSmbCredentials(host, port);
+                })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void askSmbCredentials(final String host, final int port) {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(20);
         form.setPadding(pad, dp(8), pad, dp(8));
 
-        final EditText host = addField(form, "호스트 / IP 주소", false);
-        final EditText port = addField(form, "포트 (기본 445)", false);
-        port.setText("445");
-        final EditText share = addField(form, "공유 이름", false);
         final EditText user = addField(form, "사용자 이름 (비우면 익명)", false);
         final EditText pass = addField(form, "비밀번호", true);
 
         new AlertDialog.Builder(this)
-                .setTitle("SMB")
+                .setTitle(host)
                 .setView(form)
-                .setPositiveButton("다음", (d, w) -> {
-                    String h = host.getText().toString().trim();
-                    if (h.isEmpty()) return;
-                    int p;
-                    try { p = Integer.parseInt(port.getText().toString().trim()); }
-                    catch (NumberFormatException e) { p = 445; }
-                    String sh = share.getText().toString().trim();
+                .setPositiveButton("연결", (d, w) -> {
                     String u = user.getText().toString().trim();
                     String pw = pass.getText().toString();
-                    if (!u.isEmpty()) SmbCredentials.save(this, h, sh, u, pw, null);
-                    startSmbBrowse(h, p, sh, u, pw, "");
+                    startSmbShareList(host, port, u, pw);
                 })
                 .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void startSmbShareList(final String host, final int port,
+                                    final String user, final String pass) {
+        Toast.makeText(this, "SMB 에 연결하는 중…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final List<String> shares = SmbBrowser.listShares(host, port, user, pass);
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() { showSmbShareList(host, port, user, pass, shares); }
+                    });
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            Toast.makeText(MainActivity.this,
+                                    "SMB 실패: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
+            }
+        }, "smb-shares").start();
+    }
+
+    private void showSmbShareList(final String host, final int port,
+                                   final String user, final String pass, final List<String> shares) {
+        if (shares.isEmpty()) {
+            Toast.makeText(this, "이 계정으로 접근 가능한 공유가 없습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("공유 선택")
+                .setItems(shares.toArray(new String[0]), (d, which) -> {
+                    String share = shares.get(which);
+                    if (!user.isEmpty()) SmbCredentials.save(this, host, share, user, pass, null);
+                    startSmbBrowse(host, port, share, user, pass, "");
+                })
                 .show();
     }
 

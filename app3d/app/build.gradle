@@ -54,6 +54,15 @@ android {
     lint { abortOnError false }
 }
 
+configurations.all {
+    resolutionStrategy {
+        // dcerpc 0.12.13(아래) 가 smbj 0.12.2 를 보고 만들어져 있다. Gradle 기본값
+        // (최고 버전 승리)이 이걸 0.13.0 으로 올려 버리면 Connection.getConfig() 가
+        // 없어 NoSuchMethodError 로 런타임에 죽는다 (실기 SMB 로그인에서 실제로 겪었다).
+        force 'com.hierynomus:smbj:0.12.2'
+    }
+}
+
 dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.3.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.3.1'
@@ -64,6 +73,9 @@ dependencies {
     // SMB 공유 목록 훑기 전용. 재생 자체는 libVLC 의 libdsm/smb2 가 맡는다 —
     // smb:// URI 를 그대로 넘기면 되므로 재생 경로에는 손댈 것이 없다.
     // Apache-2.0 — 이 저장소의 MIT 와 함께 배포해도 된다. jcifs-ng 는 LGPL 이라 피했다.
-    implementation 'com.hierynomus:smbj:0.13.0'
+    implementation 'com.hierynomus:smbj:0.12.2'
+    // 로그인 정보만으로 공유 목록을 받아오는 데 쓴다 (SRVSVC NetrShareEnum, IPC$ 위의
+    // DCE/RPC). smbj 는 이 RPC 계층이 없어서 따로 붙인다. BSD-3-Clause.
+    implementation 'com.rapid7.client:dcerpc:0.12.13'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }
