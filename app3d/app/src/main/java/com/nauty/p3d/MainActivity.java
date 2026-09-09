@@ -567,12 +567,21 @@ public class MainActivity extends Activity {
         final EditText user = addField(form, "사용자 이름 (비우면 익명)", false);
         final EditText pass = addField(form, "비밀번호", true);
 
+        // 이 호스트로 전에 로그인한 적이 있으면 미리 채워 둔다 — 매번 다시
+        // 입력하지 않아도 되게 (사용자 요청).
+        SmbCredentials.Entry saved = SmbCredentials.find(this, host);
+        if (saved != null) {
+            user.setText(saved.user);
+            pass.setText(saved.pass);
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle(host)
                 .setView(form)
                 .setPositiveButton("연결", (d, w) -> {
                     String u = user.getText().toString().trim();
                     String pw = pass.getText().toString();
+                    if (!u.isEmpty()) SmbCredentials.save(this, host, u, pw, null);
                     startSmbShareList(host, port, u, pw);
                 })
                 .setNegativeButton("취소", null)
@@ -611,7 +620,7 @@ public class MainActivity extends Activity {
                 .setTitle("공유 선택")
                 .setItems(shares.toArray(new String[0]), (d, which) -> {
                     String share = shares.get(which);
-                    if (!user.isEmpty()) SmbCredentials.save(this, host, share, user, pass, null);
+                    // 계정은 이미 askSmbCredentials() 에서 저장했다 — 여기선 공유만 고른다.
                     startSmbBrowse(host, port, share, user, pass, "");
                 })
                 .show();
