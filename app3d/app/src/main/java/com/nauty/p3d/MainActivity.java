@@ -525,6 +525,11 @@ public class MainActivity extends Activity {
                             final java.io.File f = YouTube.downloadCaption(MainActivity.this, c);
                             runOnUiThread(new Runnable() {
                                 @Override public void run() {
+                                    if (f == null) {
+                                        Toast.makeText(MainActivity.this,
+                                                "선택한 자막을 가져오지 못해 자막 없이 재생합니다. (유튜브가 자동 번역 자막 요청을 막을 때가 있습니다.)",
+                                                Toast.LENGTH_LONG).show();
+                                    }
                                     open(q.playUri(), p.title, f != null ? f.getAbsolutePath() : null);
                                 }
                             });
