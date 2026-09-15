@@ -27,3 +27,4 @@ keystore.properties
 
 # FFmpeg 정적 라이브러리와 헤더 (app3d/ffmpeg/README.md 의 스크립트로 재생성)
 app3d/ffmpeg/src/main/jni/ffmpeg/
+app3d/build_depthflix_proma*.log

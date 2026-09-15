@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">P3D Player</string>
+    <string name="app_name">DepthFlix</string>
     <!-- 폴더 목록에서 내부 저장소 최상위를 가리킬 때. -->
     <string name="internal_storage">내장 저장소</string>
 </resources>
