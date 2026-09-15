@@ -11,7 +11,7 @@ ProMa P10 (무안경 3D 태블릿, MTK X20 / Android 8.0 / arm64) 관련 작업 
 
 | 경로 | 내용 |
 |---|---|
-| [`app3d/`](app3d/) | **P3D Player** — 새로 만든 3D 플레이어 (안드로이드 프로젝트) |
+| [`app3d/`](app3d/) | **DepthFlix** — 새로 만든 3D 플레이어 (안드로이드 프로젝트) |
 | [`app3d/README.md`](app3d/README.md) | 앱 구조·빌드 방법·겪은 버그와 원인 |
 | [`FINDINGS.md`](FINDINGS.md) | 리버스엔지니어링 전체 기록 (3DFV API, 셰이더 수식, 원본 버그) |
 | `apks/` | 분석 대상이 된 기기 기본 앱 APK (기기에서 추출) |

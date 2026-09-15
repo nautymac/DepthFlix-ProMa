@@ -13,7 +13,7 @@ top of what that revealed.
 
 | Path | What it is |
 |---|---|
-| [`app3d/`](app3d/) | **P3D Player** — the new 3D player (Android project) |
+| [`app3d/`](app3d/) | **DepthFlix** — the new 3D player (Android project) |
 | [`app3d/README.en.md`](app3d/README.en.md) | App structure, build instructions, bugs hit and their causes |
 | [`FINDINGS.en.md`](FINDINGS.en.md) | Full reverse-engineering notes (3DFV API, shader math, bugs in the stock app) |
 | `apks/` | The stock APKs that were analysed (pulled from the device) |
