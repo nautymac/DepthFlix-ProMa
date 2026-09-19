@@ -3,6 +3,7 @@
 *한국어 · [English](README.en.md)*
 
 ProMa P10 (무안경 3D 태블릿, MTK X20 / Android 8.0 / arm64) 관련 작업 모음.
+같은 3DFV(WZ Tech) 렌티큘러 패널 계열인 IHQ Skyy 3D, ProMa King Tablet에서도 사용 가능하다.
 
 기기에 기본 탑재된 3D 앱들(3DPlayer / Sight3D / 3DFV)을 리버스엔지니어링해서
 렌더 파이프라인을 알아내고, 그걸 바탕으로 통합 3D 플레이어를 새로 만들었다.

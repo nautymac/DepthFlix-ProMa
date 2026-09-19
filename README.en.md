@@ -3,7 +3,8 @@
 *[한국어](README.md) · English*
 
 Work around the ProMa P10 — a glasses-free autostereoscopic tablet
-(MTK X20 / Android 8.0 / arm64).
+(MTK X20 / Android 8.0 / arm64). Also works on the IHQ Skyy 3D and
+ProMa King Tablet, which use the same 3DFV (WZ Tech) lenticular panel family.
 
 The stock 3D apps that ship on the device (3DPlayer / Sight3D / 3DFV) were reverse
 engineered to recover the render pipeline, and a new unified 3D player was built on
