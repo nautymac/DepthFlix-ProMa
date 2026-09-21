@@ -14,8 +14,8 @@ android {
         applicationId "com.nauty.p3d"
         minSdk 24             // youtubedl-android 요구치 (실기는 API 26 이라 문제 없다)
         targetSdk 28          // 기기가 API 26 — 레거시 저장소 접근 유지
-        versionCode 5
-        versionName "1.7.0"
+        versionCode 6
+        versionName "1.7.1"
         ndk { abiFilters 'arm64-v8a' }   // 기기가 arm64 하나뿐이다
     }
 
