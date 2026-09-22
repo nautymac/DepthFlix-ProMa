@@ -119,6 +119,11 @@ public class ExoEngine implements VideoEngine {
                             Log.i(TAG, "영상 트랙 " + f.sampleMimeType + " " + f.width + "x" + f.height
                                     + " color=" + describe(f.colorInfo)
                                     + (g.isTrackSelected(i) ? " [선택됨]" : ""));
+                            if (g.isTrackSelected(i) && listener != null) {
+                                int mode = shaderHdrMode(f.colorInfo);
+                                if (mode != 0) Log.i(TAG, "HDR 영상 → 셰이더 톤매핑 (mode " + mode + ")");
+                                listener.onVideoHdr(mode);
+                            }
                         }
                         continue;
                     }
@@ -238,6 +243,17 @@ public class ExoEngine implements VideoEngine {
         return MimeTypes.APPLICATION_PGS.equals(mimeType)
                 || MimeTypes.APPLICATION_VOBSUB.equals(mimeType)
                 || MimeTypes.APPLICATION_DVBSUBS.equals(mimeType);
+    }
+
+    /**
+     * 셰이더가 해야 할 HDR->SDR 변환. Android 13 이상은 디코더가 톤매핑하므로 0
+     * (ToneMappingVideoRenderer). 그 아래는 p3d_src.frag 의 uHdr 로 넘긴다.
+     */
+    private static int shaderHdrMode(ColorInfo c) {
+        if (c == null || Build.VERSION.SDK_INT >= 33) return 0;
+        if (c.colorTransfer == C.COLOR_TRANSFER_ST2084) return 1;
+        if (c.colorTransfer == C.COLOR_TRANSFER_HLG)    return 2;
+        return 0;
     }
 
     /** colorSpace 1=BT709 2=BT601 6=BT2020, transfer 3=SDR 6=PQ(ST2084) 7=HLG, range 1=limited 2=full. */

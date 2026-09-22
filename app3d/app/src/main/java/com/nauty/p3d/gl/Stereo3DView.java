@@ -41,6 +41,7 @@ public class Stereo3DView extends GLSurfaceView {
     private volatile SourceFormat sourceFormat = SourceFormat.MONO_2D;
     private volatile Output       output       = Output.THREE_D;
     private volatile boolean      swapLR       = false;
+    private volatile int          hdrMode      = 0;       // 0 없음, 1 PQ, 2 HLG (p3d_src.frag uHdr)
     private volatile float        depth        = 1.0f;    // 2D->3D 시어 배율
     /**
      * 수렴 보정. 화면에 나가는 시차(우안 x − 좌안 x)에 더할 픽셀 수다.
@@ -134,6 +135,8 @@ public class Stereo3DView extends GLSurfaceView {
     public void setSwapLR(boolean s)            { swapLR = s;       requestRender(); }
     public void setDepth(float d)               { depth = d;        requestRender(); }
     public void setBottomCut(float c)           { bottomCut = c;    requestRender(); }
+    /** Android 13 미만에서 HDR 영상일 때만 0 이 아니다 (ExoEngine.shaderHdrMode 참고). */
+    public void setHdrMode(int m)               { hdrMode = m;      requestRender(); }
 
     /** 슬라이더와 자동 보정이 함께 쓰는 한계. 실측 최대 보정량이 224px 이라 넉넉히 잡는다. */
     public static final float CONVERGENCE_MAX = 320f;
@@ -364,6 +367,7 @@ public class Stereo3DView extends GLSurfaceView {
             int dxL   = (halfW - dw) / 2;
             int dxR   = halfW + dxL;
 
+            src.setHdrMode(hdrMode);
             float shearTop   = 0f;
             float shearSlope = 0f;
             if (f == SourceFormat.MONO_2D) {
@@ -479,6 +483,7 @@ public class Stereo3DView extends GLSurfaceView {
             }
             GLES20.glViewport((int) ((surfW - sw) / 2f), (int) ((surfH - sh) / 2f),
                               Math.max(1, (int) sw), Math.max(1, (int) sh));
+            src.setHdrMode(hdrMode);
             src.draw(oesTex, stMatrix, uv[0], uv[1], uv[2], uv[3], 0f, 0f, bottomCut);
 
             // 2D 출력에서는 자막도 한 번만, 시차 없이.
